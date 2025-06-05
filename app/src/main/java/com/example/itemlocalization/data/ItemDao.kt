@@ -13,12 +13,12 @@ interface ItemDao {
     fun getAllItems(): Flow<List<Item>>
 
     @Insert
-    fun insertItem(item: Item)
+    suspend fun insertItem(item: Item)
 
     @Delete
-    fun deleteItem(item: Item)
+    suspend fun deleteItem(item: Item)
 
     @Update
-    fun updateItem(item: Item)
+    suspend fun updateItem(item: Item)
 
 }
