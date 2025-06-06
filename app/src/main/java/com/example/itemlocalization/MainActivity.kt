@@ -5,6 +5,7 @@ package com.example.itemlocalization
 import android.content.Context
 import android.graphics.Canvas
 import android.location.Geocoder
+import android.location.Location
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -42,12 +43,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.itemlocalization.data.Item
 import com.google.android.gms.maps.model.BitmapDescriptor
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import java.util.Locale
 import androidx.core.graphics.createBitmap
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import android.Manifest
+import android.content.pm.PackageManager
+
 
 sealed class Screen {
     object Map : Screen()
@@ -56,56 +63,84 @@ sealed class Screen {
 }
 
 class MainActivity : ComponentActivity() {
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent {
-            ItemLocalizationTheme {
-                val context = this
-                val viewModel: ItemViewModel = viewModel(
-                    factory = ViewModelProvider.AndroidViewModelFactory.getInstance(application)
-                )
-                val items by viewModel.items.observeAsState(emptyList())
 
-                var currentScreen by remember { mutableStateOf<Screen>(Screen.Map) }
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
 
-                when (val screen = currentScreen) {
-                    is Screen.Map -> MapScreen(
-                        items = items,
-                        onAddClick = { currentScreen = Screen.Add },
-                        onShowDetails = { item -> currentScreen = Screen.Details(item.id) }
-                    )
-                    is Screen.Add -> AddItemScreen(
-                        viewModel = viewModel,
-                        context = context,
-                        onItemAdded = { currentScreen = Screen.Map }
-                    )
-                    is Screen.Details -> {
-                        val selectedItem = items.find { it.id == screen.itemId }
-                        selectedItem?.let {
-                            ItemDetailsScreen(
-                                viewModel = viewModel,
-                                item = it,
-                                onBack = { currentScreen = Screen.Map }
-                            )
-                        }
-                    }
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                1001
+            )
+            return
+        }
 
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
+        fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
+            val startLocation = location?.let { LatLng(it.latitude, it.longitude) }
+                ?: LatLng(52.2297, 21.0122)
+
+            setContent {
+                ItemLocalizationTheme {
+                    AppContent(startLocation = startLocation)
                 }
             }
         }
     }
 }
 
+@Composable
+fun AppContent(startLocation: LatLng) {
+    val context = LocalContext.current
+    val viewModel: ItemViewModel = viewModel(
+        factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as android.app.Application)
+    )
+    val items by viewModel.items.observeAsState(emptyList())
+
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Map) }
+
+    when (val screen = currentScreen) {
+        is Screen.Map -> MapScreen(
+            items = items,
+            onAddClick = { currentScreen = Screen.Add },
+            onShowDetails = { item -> currentScreen = Screen.Details(item.id) },
+            startLocation = startLocation
+        )
+        is Screen.Add -> AddItemScreen(
+            viewModel = viewModel,
+            context = context,
+            onItemAdded = { currentScreen = Screen.Map }
+        )
+        is Screen.Details -> {
+            val selectedItem = items.find { it.id == screen.itemId }
+            selectedItem?.let {
+                ItemDetailsScreen(
+                    viewModel = viewModel,
+                    item = it,
+                    onBack = { currentScreen = Screen.Map }
+                )
+            }
+        }
+    }
+}
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapScreen(
     items: List<Item>,
     onAddClick: () -> Unit,
-    onShowDetails: (Item) -> Unit
+    onShowDetails: (Item) -> Unit,
+    startLocation: LatLng
 ) {
     val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(LatLng(52.2297, 21.0122), 12f)
+        position = CameraPosition.fromLatLngZoom(startLocation, 12f)
     }
 
     var selectedItem by remember { mutableStateOf<Item?>(null) }
