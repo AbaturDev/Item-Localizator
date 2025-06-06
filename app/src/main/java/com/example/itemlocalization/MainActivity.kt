@@ -1,10 +1,12 @@
+@file:Suppress("DEPRECATION")
+
 package com.example.itemlocalization
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.location.Geocoder
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -24,7 +26,9 @@ import com.google.maps.android.compose.Marker
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.ViewModelProvider
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
@@ -37,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.core.content.ContextCompat
 import com.example.itemlocalization.data.Item
 import com.google.android.gms.maps.model.BitmapDescriptor
@@ -44,6 +49,11 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import java.util.Locale
 import androidx.core.graphics.createBitmap
 
+sealed class Screen {
+    object Map : Screen()
+    object Add : Screen()
+    data class Details(val itemId: Int) : Screen()
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,19 +67,30 @@ class MainActivity : ComponentActivity() {
                 )
                 val items by viewModel.items.observeAsState(emptyList())
 
-                var showAddScreen by remember { mutableStateOf(false) }
+                var currentScreen by remember { mutableStateOf<Screen>(Screen.Map) }
 
-                if (showAddScreen) {
-                    AddItemScreen(
+                when (val screen = currentScreen) {
+                    is Screen.Map -> MapScreen(
+                        items = items,
+                        onAddClick = { currentScreen = Screen.Add },
+                        onShowDetails = { item -> currentScreen = Screen.Details(item.id) }
+                    )
+                    is Screen.Add -> AddItemScreen(
                         viewModel = viewModel,
                         context = context,
-                        onItemAdded = { showAddScreen = false }
+                        onItemAdded = { currentScreen = Screen.Map }
                     )
-                } else {
-                    MapScreen(
-                        items = items,
-                        onAddClick = { showAddScreen = true }
-                    )
+                    is Screen.Details -> {
+                        val selectedItem = items.find { it.id == screen.itemId }
+                        selectedItem?.let {
+                            ItemDetailsScreen(
+                                viewModel = viewModel,
+                                item = it,
+                                onBack = { currentScreen = Screen.Map }
+                            )
+                        }
+                    }
+
                 }
             }
         }
@@ -80,11 +101,15 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MapScreen(
     items: List<Item>,
-    onAddClick: () -> Unit
+    onAddClick: () -> Unit,
+    onShowDetails: (Item) -> Unit
 ) {
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(52.2297, 21.0122), 12f)
     }
+
+    var selectedItem by remember { mutableStateOf<Item?>(null) }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -119,10 +144,36 @@ fun MapScreen(
                     Marker(
                         state = MarkerState(position = LatLng(item.latitude, item.longitude)),
                         title = item.name,
-                        snippet = item.description,
-                        icon = bitmapDescriptorFromVector(context = LocalContext.current, resId = R.drawable.location)
+                        snippet = item.address,
+                        icon = bitmapDescriptorFromVector(context = LocalContext.current, resId = R.drawable.custom_marker),
+                        onClick = {
+                            selectedItem = item
+                            true
+                        }
                     )
                 }
+            }
+            selectedItem?.let { item ->
+                AlertDialog(
+                    onDismissRequest = { selectedItem = null },
+                    confirmButton = {
+                        Button(onClick = {
+                            selectedItem?.let { onShowDetails(it) }
+                            selectedItem = null
+                        }) {
+                            Text("Szczegóły")
+                        }
+                    },
+                    dismissButton = {
+                        Button(onClick = { selectedItem = null }) {
+                            Text("Zamknij")
+                        }
+                    },
+                    title = { Text(
+                        text = item.name,
+                        textAlign = TextAlign.Center,) },
+                    text = { Text("Adres: ${item.address}") }
+                )
             }
         }
     }
@@ -201,6 +252,7 @@ fun AddItemScreen(
                                     )
                                     viewModel.addItem(item)
                                     onItemAdded()
+                                    Toast.makeText(context, "Przedmiot dodany", Toast.LENGTH_SHORT).show()
                                 } else {
                                     errorMessage = "Nie znaleziono lokalizacji dla podanego adresu."
                                 }
@@ -217,6 +269,134 @@ fun AddItemScreen(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ItemDetailsScreen(
+    viewModel: ItemViewModel,
+    item: Item,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    var name by remember { mutableStateOf(item.name) }
+    var description by remember { mutableStateOf(item.description) }
+    var address by remember { mutableStateOf(item.address) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text(text = "Usuń \"${item.name}\"", textAlign = TextAlign.Center) },
+            text = { Text("Czy na pewno chcesz usunąć ten przedmiot?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteItem(item)
+                        showDeleteDialog = false
+                        onBack()
+                        Toast.makeText(context, "Przedmiot usunięty", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("Usuń")
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showDeleteDialog = false }) {
+                    Text("Anuluj")
+                }
+            }
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Szczegóły przedmiotu") }
+            )
+        },
+        content = { padding ->
+            Column(
+                modifier = Modifier
+                    .padding(padding)
+                    .padding(16.dp)
+                    .fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Nazwa") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Opis") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("Adres") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(text = "Szerokość geograficzna: ${item.latitude}")
+                Text(text = "Długość geograficzna: ${item.longitude}")
+
+                errorMessage?.let {
+                    Text(text = it, color = Color.Red)
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Button(onClick = onBack) {
+                        Text("Powrót")
+                    }
+
+                    Button(
+                        onClick = {
+                            showDeleteDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                    ) {
+                        Text("Usuń", color = Color.White)
+                    }
+
+                    Button(
+                        onClick = {
+                            if (name.isNotBlank() && address.isNotBlank()) {
+                                val latLng = getLocationFromAddress(context, address)
+                                if (latLng != null) {
+                                    val updatedItem = item.copy(
+                                        name = name,
+                                        description = description,
+                                        address = address,
+                                        latitude = latLng.latitude,
+                                        longitude = latLng.longitude
+                                    )
+                                    viewModel.updateItem(updatedItem)
+                                    Toast.makeText(context, "Przedmiot zaktualizowany", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    errorMessage = "Nie znaleziono lokalizacji dla podanego adresu."
+                                }
+                            } else {
+                                errorMessage = "Wypełnij wymagane pola."
+                            }
+                        }
+                    ) {
+                        Text("Aktualizuj")
+                    }
+                }
+            }
+        }
+    )
+}
+
 fun getLocationFromAddress(context: Context, strAddress: String): LatLng? {
     return try {
         val geocoder = Geocoder(context, Locale.getDefault())
@@ -225,14 +405,14 @@ fun getLocationFromAddress(context: Context, strAddress: String): LatLng? {
             val location = addresses[0]
             LatLng(location.latitude, location.longitude)
         } else null
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         null
     }
 }
 
 fun bitmapDescriptorFromVector(context: Context, resId: Int): BitmapDescriptor {
     val vectorDrawable = ContextCompat.getDrawable(context, resId)!!
-    val bitmap = createBitmap(100, 100)
+    val bitmap = createBitmap(120, 120)
     val canvas = Canvas(bitmap)
     vectorDrawable.setBounds(0, 0, canvas.width, canvas.height)
     vectorDrawable.draw(canvas)
