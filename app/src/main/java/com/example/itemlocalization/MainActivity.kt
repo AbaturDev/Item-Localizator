@@ -54,7 +54,7 @@ import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import android.Manifest
 import android.content.pm.PackageManager
-
+import com.google.maps.android.compose.CameraPositionState
 
 sealed class Screen {
     object Map : Screen()
@@ -105,12 +105,16 @@ fun AppContent(startLocation: LatLng) {
 
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Map) }
 
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(startLocation, 12f)
+    }
+
     when (val screen = currentScreen) {
         is Screen.Map -> MapScreen(
             items = items,
             onAddClick = { currentScreen = Screen.Add },
             onShowDetails = { item -> currentScreen = Screen.Details(item.id) },
-            startLocation = startLocation
+            cameraPositionState = cameraPositionState,
         )
         is Screen.Add -> AddItemScreen(
             viewModel = viewModel,
@@ -137,12 +141,8 @@ fun MapScreen(
     items: List<Item>,
     onAddClick: () -> Unit,
     onShowDetails: (Item) -> Unit,
-    startLocation: LatLng
+    cameraPositionState: CameraPositionState,
 ) {
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(startLocation, 12f)
-    }
-
     var selectedItem by remember { mutableStateOf<Item?>(null) }
 
     Scaffold(
